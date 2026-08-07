@@ -1,0 +1,31 @@
+{
+  "name": "devpilot-ai",
+  "displayName": "DevPilot AI",
+  "description": "Repository-aware AI engineering assistant",
+  "version": "0.1.0",
+  "publisher": "devpilot-ai",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/devpilot-ai/devpilot-ai" },
+  "engines": { "vscode": "^1.99.0" },
+  "categories": ["Other", "Machine Learning"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "devpilot.indexWorkspace", "title": "DevPilot: Index Workspace" },
+      { "command": "devpilot.askAboutCode", "title": "DevPilot: Ask About Code" },
+      { "command": "devpilot.explainSelection", "title": "DevPilot: Explain Selection" }
+    ],
+    "configuration": {
+      "title": "DevPilot AI",
+      "properties": {
+        "devpilot.backendUrl": { "type": "string", "default": "http://localhost:3000", "description": "DevPilot backend URL" }
+      }
+    },
+    "viewsContainers": { "activitybar": [{ "id": "devpilot", "title": "DevPilot", "icon": "media/devpilot.svg" }] },
+    "views": { "devpilot": [{ "id": "devpilot.chatView", "name": "Chat" }] }
+  },
+  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit", "package": "npm run build && vsce package --no-dependencies" },
+  "dependencies": {},
+  "devDependencies": { "@types/node": "^22.15.0", "@types/vscode": "^1.99.3", "typescript": "^5.8.3", "@vscode/vsce": "^3.6.0" }
+}
