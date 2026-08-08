@@ -4,12 +4,16 @@ import { retrieveChunks } from "../services/search.service.js";
 import { AgentTool, executeTool, isApprovalTool, previewWrite, toolDefinitions } from "./tools.js";
 import { createApproval } from "./approvals.js";
 import { getRepositoryRoot } from "./repository.js";
+import { agentApprovals, agentTasks } from "../db/schema.js";
+import { db } from "../db/client.js";
+import { and, eq, gt } from "drizzle-orm";
 
 const planSchema = z.object({
   calls: z.array(z.object({ tool: z.enum(["list_files", "read_file", "search_code", "get_git_status", "write_file", "run_command"]), args: z.record(z.string(), z.union([z.string(), z.number()])).default({}) })).max(5),
 });
 
 export type AgentPlan = z.infer<typeof planSchema>;
+type AgentCallResult = { tool: AgentTool; status: string; result?: unknown; approvalId?: string; error?: string };
 
 export function parseAgentPlan(text: string): AgentPlan | undefined {
   const cleaned = text.replace(/```(?:json)?/gi, "").replace(/```/g, "");
@@ -69,4 +73,41 @@ export async function runAgentTask(repositoryId: string, task: string, provider:
     { role: "user", content: `Task: ${task}\n\nRepository context:\n${context}\n\nTool results:\n${JSON.stringify(results).slice(0, 24_000)}` },
   ]);
   return { status: "completed", answer: final, sources, calls: results };
+}
+
+function taskContext(sources: Array<{ path: string; startLine: number; endLine: number; content: string }>) {
+  return sources.map((source) => `FILE ${source.path}:${source.startLine}-${source.endLine}\n${source.content}`).join("\n\n").slice(0, 16_000);
+}
+
+export async function resumeAgentTask(action: { id: string; taskId: string; repositoryId: string; tool: AgentTool; approved: boolean; result?: unknown; validation?: unknown }) {
+  const rows = await db.select().from(agentTasks).where(eq(agentTasks.id, action.taskId));
+  const task = rows[0];
+  if (!task) throw new Error("Agent task not found");
+  const previous = (task.result && typeof task.result === "object" ? task.result : {}) as { sources?: Array<{ path: string; startLine: number; endLine: number; content: string }>; calls?: AgentCallResult[] };
+  const calls = [...(previous.calls ?? [])];
+  const call = calls.find((item) => item.approvalId === action.id);
+  if (call) {
+    call.status = action.approved ? (action.validation && (action.validation as { passed?: boolean }).passed === false ? "validation_failed" : "completed") : "rejected";
+    call.result = action.result ?? action.validation;
+  }
+  const updatedResult = { ...previous, calls };
+  if (!action.approved) {
+    await db.update(agentTasks).set({ status: "rejected", result: updatedResult, completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
+    return { status: "rejected", answer: "The requested action was rejected. No further changes were made.", calls };
+  }
+  const pending = await db.select({ id: agentApprovals.id }).from(agentApprovals).where(and(eq(agentApprovals.taskId, action.taskId), eq(agentApprovals.status, "pending"), gt(agentApprovals.expiresAt, new Date())));
+  if (pending.length > 0) {
+    await db.update(agentTasks).set({ status: "approval_required", result: updatedResult }).where(eq(agentTasks.id, action.taskId));
+    return { status: "approval_required", answer: "One approved action completed. Additional approval is required before the task can finish.", calls };
+  }
+  const sources = previous.sources ?? await retrieveChunks(task.repositoryId, task.task, 6);
+  const final = await completeChat(task.provider as LlmProvider, [
+    { role: "system", content: "You are DevPilot, an engineering agent completing a task after approved actions. Summarize what changed, report validation results, and do not claim anything absent from the tool results. Cite repository files only when present in the evidence." },
+    { role: "user", content: `Task: ${task.task}\n\nRepository context:\n${taskContext(sources)}\n\nTool results:\n${JSON.stringify(calls).slice(0, 24_000)}` },
+  ]);
+  const validationFailed = calls.some((item) => item.status === "validation_failed");
+  const status = validationFailed ? "validation_failed" : "completed";
+  const result = { status, answer: final, sources, calls };
+  await db.update(agentTasks).set({ status, result, completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
+  return result;
 }

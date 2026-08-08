@@ -3,7 +3,7 @@ import { z } from "zod";
 import { executeTool, isApprovalTool, toolDefinitions, validateWorkspace } from "../agent/tools.js";
 import { createApproval, resolveApproval } from "../agent/approvals.js";
 import { getRepositoryRoot } from "../agent/repository.js";
-import { runAgentTask } from "../agent/runner.js";
+import { resumeAgentTask, runAgentTask } from "../agent/runner.js";
 import { agentApprovals, agentTasks } from "../db/schema.js";
 import { db } from "../db/client.js";
 import { and, eq, gt } from "drizzle-orm";
@@ -25,7 +25,7 @@ export async function agentRoutes(app: FastifyInstance) {
     recordMetric("agent.tasks.started");
     try {
       const result = await runAgentTask(parsed.data.repositoryId, parsed.data.task, parsed.data.provider, taskId);
-      await db.update(agentTasks).set({ status: result.status, result, completedAt: new Date() }).where(eq(agentTasks.id, taskId));
+      await db.update(agentTasks).set({ status: result.status, result, ...(result.status === "approval_required" ? {} : { completedAt: new Date() }) }).where(eq(agentTasks.id, taskId));
       recordMetric(`agent.tasks.${result.status}`);
       return { taskId, ...result };
     } catch (error) {
@@ -61,15 +61,11 @@ export async function agentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const action = await resolveApproval(parsed.data.approvalId, parsed.data.approved);
     if (!action) return reply.code(404).send({ error: "Approval request not found or expired" });
-    if (!parsed.data.approved) {
-      if (action.taskId) await db.update(agentTasks).set({ status: "rejected", completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
-      return { status: "rejected", tool: action.tool, taskId: action.taskId };
-    }
+    if (!action.taskId) return reply.code(409).send({ error: "Approval is not linked to an agent task" });
+    if (!parsed.data.approved) return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: false });
     const repositoryRoot = await getRepositoryRoot(action.repositoryId);
     const result = await executeTool(action.tool, repositoryRoot, action.args);
     const validation = action.tool === "write_file" ? await validateWorkspace(repositoryRoot) : undefined;
-    const status = validation && !validation.passed ? "validation_failed" : "completed";
-    if (action.taskId) await db.update(agentTasks).set({ status, result: { approval: { tool: action.tool, result, validation } }, completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
-    return { status, tool: action.tool, taskId: action.taskId, result, validation };
+    return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: true, result: { tool: action.tool, result }, validation });
   });
 }

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import os from "node:os";
+import path from "node:path";
 import { buildApp } from "../src/app.js";
+import { db } from "../src/db/client.js";
+import { agentApprovals, agentTasks, repositories } from "../src/db/schema.js";
+import { eq } from "drizzle-orm";
 
 const app = buildApp();
 
@@ -40,6 +45,21 @@ test("agent tools are exposed and malformed tool input is rejected", async () =>
 test("agent approval queue validates repository identifiers", async () => {
   const response = await app.inject({ method: "GET", url: "/agent/approvals/not-a-uuid" });
   assert.equal(response.statusCode, 400);
+});
+
+test("rejecting a linked approval closes the agent task safely", async () => {
+  const repository = (await db.insert(repositories).values({ name: "approval-test", rootPath: path.join(os.tmpdir(), `devpilot-approval-${Date.now()}`) }).returning({ id: repositories.id }))[0];
+  const task = (await db.insert(agentTasks).values({ repositoryId: repository.id, task: "test approval", provider: "ollama" }).returning({ id: agentTasks.id }))[0];
+  const approval = (await db.insert(agentApprovals).values({ taskId: task.id, repositoryId: repository.id, tool: "run_command", args: { command: "git status" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: agentApprovals.id }))[0];
+  try {
+    const response = await app.inject({ method: "POST", url: "/agent/approve", payload: { approvalId: approval.id, approved: false } });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().status, "rejected");
+    const stored = (await db.select({ status: agentTasks.status }).from(agentTasks).where(eq(agentTasks.id, task.id)))[0];
+    assert.equal(stored.status, "rejected");
+  } finally {
+    await db.delete(repositories).where(eq(repositories.id, repository.id));
+  }
 });
 
 test("streaming chat route exists and validates input", async () => {
