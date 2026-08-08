@@ -44,7 +44,7 @@ test("asynchronous indexing job routes validate requests", async () => {
 test("agent tools are exposed and malformed tool input is rejected", async () => {
   const tools = await app.inject({ method: "GET", url: "/agent/tools" });
   assert.equal(tools.statusCode, 200);
-  assert.equal(tools.json().tools.length, 6);
+  assert.equal(tools.json().tools.length, 7);
   const invalid = await app.inject({ method: "POST", url: "/agent/tools/execute", payload: { tool: "not-a-tool" } });
   assert.equal(invalid.statusCode, 400);
 });

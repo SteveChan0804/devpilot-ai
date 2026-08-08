@@ -6,13 +6,14 @@ import fg from "fast-glob";
 import { assertReasonableSize, assertSafeAgentPath, resolveWorkspacePath } from "./workspace.js";
 
 const execFileAsync = promisify(execFile);
-export type AgentTool = "list_files" | "read_file" | "search_code" | "get_git_status" | "write_file" | "run_command";
+export type AgentTool = "list_files" | "read_file" | "search_code" | "get_git_status" | "get_git_diff" | "write_file" | "run_command";
 
 export const toolDefinitions = [
   { name: "list_files", permission: "READ_ONLY", description: "List source files in the repository" },
   { name: "read_file", permission: "READ_ONLY", description: "Read a file inside the repository" },
   { name: "search_code", permission: "READ_ONLY", description: "Search text in source files" },
   { name: "get_git_status", permission: "READ_ONLY", description: "Read git status" },
+  { name: "get_git_diff", permission: "READ_ONLY", description: "Read the current Git diff for review" },
   { name: "write_file", permission: "USER_APPROVAL", description: "Write a file after approval" },
   { name: "run_command", permission: "USER_APPROVAL", description: "Run an allowlisted development command after approval" },
 ] as const;
@@ -121,6 +122,10 @@ export async function executeTool(tool: AgentTool, rootPath: string, args: ToolA
     case "get_git_status": {
       const result = await execFileAsync("git", ["status", "--short"], { cwd: rootPath, timeout: 15_000, maxBuffer: 100_000 });
       return { output: result.stdout };
+    }
+    case "get_git_diff": {
+      const result = await execFileAsync("git", ["diff", "--no-ext-diff", "--", "."], { cwd: rootPath, timeout: 15_000, maxBuffer: 500_000 });
+      return { output: result.stdout.slice(0, 500_000) };
     }
     case "write_file": {
       assertSafeAgentPath(String(args.path ?? ""));

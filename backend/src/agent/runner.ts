@@ -9,7 +9,7 @@ import { db } from "../db/client.js";
 import { and, eq, gt } from "drizzle-orm";
 
 const planSchema = z.object({
-  calls: z.array(z.object({ tool: z.enum(["list_files", "read_file", "search_code", "get_git_status", "write_file", "run_command"]), args: z.record(z.string(), z.union([z.string(), z.number()])).default({}) })).max(5),
+  calls: z.array(z.object({ tool: z.enum(["list_files", "read_file", "search_code", "get_git_status", "get_git_diff", "write_file", "run_command"]), args: z.record(z.string(), z.union([z.string(), z.number()])).default({}) })).max(5),
 });
 
 export type AgentPlan = z.infer<typeof planSchema>;

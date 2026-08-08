@@ -20,6 +20,13 @@ test("agent path guard rejects secrets and dependency folders", () => {
   assert.throws(() => assertSafeAgentPath("node_modules/pkg/index.js"), /Sensitive/);
 });
 
+test("git diff is available as a bounded read-only review tool", async () => {
+  const result = await executeTool("get_git_diff", process.cwd(), {});
+  const output = String(result.output ?? "");
+  assert.equal(typeof result.output, "string");
+  assert.ok(output.length <= 500_000);
+});
+
 test("write previews stay inside the workspace and show changed lines", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "devpilot-preview-"));
   try {

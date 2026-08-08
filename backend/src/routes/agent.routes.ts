@@ -9,7 +9,7 @@ import { db } from "../db/client.js";
 import { and, eq, gt } from "drizzle-orm";
 import { recordMetric } from "../services/metrics.service.js";
 
-const toolNames = ["list_files", "read_file", "search_code", "get_git_status", "write_file", "run_command"] as const;
+const toolNames = ["list_files", "read_file", "search_code", "get_git_status", "get_git_diff", "write_file", "run_command"] as const;
 const requestSchema = z.object({ repositoryId: z.string().uuid(), tool: z.enum(toolNames), args: z.record(z.string(), z.union([z.string(), z.number()])).default({}) });
 const approvalSchema = z.object({ approvalId: z.string().uuid(), approved: z.boolean() });
 const runSchema = z.object({ repositoryId: z.string().uuid(), task: z.string().min(1).max(10_000), provider: z.enum(["ollama", "openrouter"]).default("ollama") });
