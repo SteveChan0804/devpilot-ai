@@ -23,7 +23,8 @@
     "configuration": {
       "title": "DevPilot AI",
       "properties": {
-        "devpilot.backendUrl": { "type": "string", "default": "http://localhost:3000", "description": "DevPilot backend URL" }
+        "devpilot.backendUrl": { "type": "string", "default": "http://localhost:3000", "description": "DevPilot backend URL" },
+        "devpilot.apiKey": { "type": "string", "default": "", "description": "Optional DevPilot backend API key", "password": true }
       }
     },
     "viewsContainers": { "activitybar": [{ "id": "devpilot", "title": "DevPilot", "icon": "media/devpilot.svg" }] },

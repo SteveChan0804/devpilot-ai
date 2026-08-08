@@ -4,9 +4,10 @@ type Repository = { id: string; rootPath: string; name: string };
 type ApiOptions = { method?: string; body?: unknown };
 
 function backendUrl() { return vscode.workspace.getConfiguration("devpilot").get<string>("backendUrl", "http://localhost:3000").replace(/\/$/, ""); }
+function backendHeaders() { const key = vscode.workspace.getConfiguration("devpilot").get<string>("apiKey", ""); return { "content-type": "application/json", ...(key ? { "x-api-key": key } : {}) }; }
 
 async function api<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
-  const response = await fetch(`${backendUrl()}${endpoint}`, { method: options.method ?? "GET", headers: { "content-type": "application/json" }, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
+  const response = await fetch(`${backendUrl()}${endpoint}`, { method: options.method ?? "GET", headers: backendHeaders(), body: options.body === undefined ? undefined : JSON.stringify(options.body) });
   if (!response.ok) throw new Error(await response.text());
   return response.json() as Promise<T>;
 }
