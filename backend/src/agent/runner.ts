@@ -29,7 +29,7 @@ function hasMutationIntent(task: string) {
   return /\b(modify|change|edit|write|create|delete|remove|refactor|run tests?|run command|execute)\b/i.test(task);
 }
 
-export async function runAgentTask(repositoryId: string, task: string, provider: LlmProvider) {
+export async function runAgentTask(repositoryId: string, task: string, provider: LlmProvider, taskId?: string) {
   const sources = await retrieveChunks(repositoryId, task, 6);
   const repositoryRoot = await getRepositoryRoot(repositoryId);
   const context = sources.map((source) => `FILE ${source.path}:${source.startLine}-${source.endLine}\n${source.content}`).join("\n\n").slice(0, 16_000);
@@ -46,7 +46,7 @@ export async function runAgentTask(repositoryId: string, task: string, provider:
     try {
       const args = { ...call.args };
       if (call.tool === "search_code" && !args.query) args.query = fallbackSearchQuery(task);
-      if (isApprovalTool(call.tool)) results.push({ tool: call.tool, status: "approval_required", approvalId: await createApproval({ repositoryId, tool: call.tool, args }) });
+      if (isApprovalTool(call.tool)) results.push({ tool: call.tool, status: "approval_required", approvalId: await createApproval({ taskId, repositoryId, tool: call.tool, args }) });
       else results.push({ tool: call.tool, status: "completed", result: await executeTool(call.tool, repositoryRoot, args) });
     } catch (error) {
       results.push({ tool: call.tool, status: "failed", error: error instanceof Error ? error.message : String(error) });

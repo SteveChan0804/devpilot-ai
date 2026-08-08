@@ -5,8 +5,9 @@ import { AgentTool, ToolArgs } from "./tools.js";
 
 const MAX_AGE_MS = 10 * 60 * 1000;
 
-export async function createApproval(action: { repositoryId: string; tool: AgentTool; args: ToolArgs }) {
+export async function createApproval(action: { taskId?: string; repositoryId: string; tool: AgentTool; args: ToolArgs }) {
   const rows = await db.insert(agentApprovals).values({
+    taskId: action.taskId,
     repositoryId: action.repositoryId,
     tool: action.tool,
     args: action.args,

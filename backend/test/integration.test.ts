@@ -37,6 +37,11 @@ test("agent tools are exposed and malformed tool input is rejected", async () =>
   assert.equal(invalid.statusCode, 400);
 });
 
+test("agent approval queue validates repository identifiers", async () => {
+  const response = await app.inject({ method: "GET", url: "/agent/approvals/not-a-uuid" });
+  assert.equal(response.statusCode, 400);
+});
+
 test("streaming chat route exists and validates input", async () => {
   const options = await app.inject({ method: "OPTIONS", url: "/chat/stream" });
   assert.equal(options.statusCode, 204);

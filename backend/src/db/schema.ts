@@ -63,6 +63,7 @@ export const chunks = pgTable("chunks", {
 
 export const agentApprovals = pgTable("agent_approvals", {
   id: uuid("id").defaultRandom().primaryKey(),
+  taskId: uuid("task_id").references(() => agentTasks.id, { onDelete: "cascade" }),
   repositoryId: uuid("repository_id").notNull().references(() => repositories.id, { onDelete: "cascade" }),
   tool: text("tool").notNull(),
   args: jsonb("args").notNull(),
