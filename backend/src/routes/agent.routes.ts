@@ -42,6 +42,14 @@ export async function agentRoutes(app: FastifyInstance) {
     return { tasks: await db.select().from(agentTasks).where(eq(agentTasks.repositoryId, parsed.data.repositoryId)) };
   });
 
+  app.get("/agent/task/:taskId", async (request, reply) => {
+    const parsed = z.object({ taskId: z.string().uuid() }).safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const rows = await db.select().from(agentTasks).where(eq(agentTasks.id, parsed.data.taskId));
+    if (!rows[0]) return reply.code(404).send({ error: "Agent task not found" });
+    return { task: rows[0] };
+  });
+
   app.get("/agent/approvals/:repositoryId", async (request, reply) => {
     const parsed = z.object({ repositoryId: z.string().uuid() }).safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });

@@ -54,6 +54,13 @@ test("agent approval queue validates repository identifiers", async () => {
   assert.equal(response.statusCode, 400);
 });
 
+test("agent task status route validates and reports missing tasks", async () => {
+  const invalid = await app.inject({ method: "GET", url: "/agent/task/not-a-uuid" });
+  assert.equal(invalid.statusCode, 400);
+  const missing = await app.inject({ method: "GET", url: "/agent/task/00000000-0000-0000-0000-000000000000" });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("rejecting a linked approval closes the agent task safely", async () => {
   const repository = (await db.insert(repositories).values({ name: "approval-test", rootPath: path.join(os.tmpdir(), `devpilot-approval-${Date.now()}`) }).returning({ id: repositories.id }))[0];
   const task = (await db.insert(agentTasks).values({ repositoryId: repository.id, task: "test approval", provider: "ollama" }).returning({ id: agentTasks.id }))[0];
