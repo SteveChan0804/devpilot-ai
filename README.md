@@ -36,6 +36,7 @@ Repository → Scanner → Chunker → Embeddings → PostgreSQL/pgvector
    cd backend
    npm install
    npm run migrate:local
+   npm run doctor
    npm run dev
    ```
 

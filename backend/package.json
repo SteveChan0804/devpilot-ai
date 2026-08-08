@@ -12,6 +12,7 @@
     "test:integration": "npm run build:test && node --test dist-test/test/integration.test.js",
     "build:test": "tsc -p tsconfig.test.json",
     "migrate:local": "node scripts/migrate.js",
+    "doctor": "npm run build && node scripts/doctor.js",
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate"
   },

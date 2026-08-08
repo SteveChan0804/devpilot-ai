@@ -9,8 +9,30 @@ import { db } from "../db/client.js";
 import { and, eq, gt } from "drizzle-orm";
 
 const planSchema = z.object({
-  calls: z.array(z.object({ tool: z.enum(["list_files", "read_file", "search_code", "get_git_status", "get_git_diff", "write_file", "run_command"]), args: z.record(z.string(), z.union([z.string(), z.number()])).default({}) })).max(5),
+  calls: z.array(z.object({ tool: z.enum(["list_files", "read_file", "search_code", "get_git_status", "get_git_diff", "write_file", "run_command"]), args: z.record(z.string(), z.union([z.string(), z.number()])).default({}) })).max(12),
 });
+const MAX_PLAN_CALLS = 5;
+const readOnlyTools = new Set(["list_files", "read_file", "search_code", "get_git_status", "get_git_diff"]);
+
+function parseTolerantReadOnlyPlan(text: string): AgentPlan | undefined {
+  const calls: Array<{ tool: AgentTool; args: Record<string, string | number> }> = [];
+  const toolPattern = /"tool"\s*:\s*"([^"]+)"/g;
+  const matches = [...text.matchAll(toolPattern)];
+  for (let index = 0; index < matches.length && calls.length < MAX_PLAN_CALLS; index++) {
+    const tool = matches[index][1];
+    if (!readOnlyTools.has(tool)) continue;
+    const start = matches[index].index ?? 0;
+    const end = matches[index + 1]?.index ?? text.length;
+    const segment = text.slice(start, end);
+    const args: Record<string, string> = {};
+    if (tool === "read_file") {
+      const pathMatch = segment.match(/"path"\s*:\s*"([^"\r\n]+)/);
+      if (pathMatch?.[1]) args.path = pathMatch[1];
+    }
+    calls.push({ tool: tool as AgentTool, args });
+  }
+  return calls.length > 0 ? { calls } : undefined;
+}
 
 export type AgentPlan = z.infer<typeof planSchema>;
 type AgentCallResult = { tool: AgentTool; status: string; result?: unknown; approvalId?: string; error?: string };
@@ -21,7 +43,16 @@ export function parseAgentPlan(text: string): AgentPlan | undefined {
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start < 0 || end <= start) return undefined;
-  try { return planSchema.parse(JSON.parse(cleaned.slice(start, end + 1))); } catch { return undefined; }
+  try {
+    const parsed = planSchema.parse(JSON.parse(cleaned.slice(start, end + 1)));
+    return {
+      calls: parsed.calls.slice(0, MAX_PLAN_CALLS).map((call) => {
+        const args = { ...call.args };
+        if (call.tool === "search_code" && !args.query && args.text) args.query = args.text;
+        return { ...call, args };
+      }),
+    };
+  } catch { return parseTolerantReadOnlyPlan(cleaned); }
 }
 
 function fallbackSearchQuery(task: string) {

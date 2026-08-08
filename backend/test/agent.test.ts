@@ -5,7 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { db } from "../src/db/client.js";
 import { repositories } from "../src/db/schema.js";
-import { runAgentTask } from "../src/agent/runner.js";
+import { parseAgentPlan, runAgentTask } from "../src/agent/runner.js";
+import { scanRepository } from "../src/scanner/scanner.js";
 import { eq } from "drizzle-orm";
 
 test("agent planner, tool execution, and final synthesis work with injected dependencies", async () => {
@@ -27,6 +28,30 @@ test("agent planner, tool execution, and final synthesis work with injected depe
     assert.equal(result.calls[0].status, "completed");
   } finally {
     await db.delete(repositories).where(eq(repositories.id, repository.id));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("planner parsing caps oversized plans and normalizes search aliases", () => {
+  const plan = parseAgentPlan(JSON.stringify({ calls: Array.from({ length: 7 }, (_, index) => ({ tool: "search_code", args: { text: `query-${index}` } })) }));
+  assert.equal(plan?.calls.length, 5);
+  assert.equal(plan?.calls[0].args.query, "query-0");
+});
+
+test("planner parsing salvages malformed read-only output but never mutations", () => {
+  const plan = parseAgentPlan('{"calls":[{"tool":"search_code","args":{"path":"broken ["model" quote"}},{"tool":"write_file","args":{"path":"src/a.ts","content":"bad"}}]}');
+  assert.equal(plan?.calls.length, 1);
+  assert.equal(plan?.calls[0].tool, "search_code");
+});
+
+test("repository scanning excludes dependency lockfiles", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "devpilot-scan-"));
+  try {
+    await writeFile(path.join(root, "package-lock.json"), "{\"stream\": true}\n", "utf8");
+    await writeFile(path.join(root, "app.ts"), "export const stream = true;\n", "utf8");
+    const files = await scanRepository(root);
+    assert.deepEqual(files.map((file) => file.path), ["app.ts"]);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

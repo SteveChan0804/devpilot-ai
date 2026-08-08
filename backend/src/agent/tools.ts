@@ -111,7 +111,7 @@ export async function executeTool(tool: AgentTool, rootPath: string, args: ToolA
     case "search_code": {
       const query = String(args.query ?? "");
       if (!query) throw new Error("Search query is required");
-      const files = await fg(["**/*.{ts,tsx,js,jsx,json,md}"], { cwd: rootPath, onlyFiles: true, ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/dist-test/**", "**/.env*", "**/*credentials*", "**/*secret*", "**/*token*"] });
+      const files = await fg(["**/*.{ts,tsx,js,jsx,json,md}"], { cwd: rootPath, onlyFiles: true, ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/dist-test/**", "**/.env*", "**/*lock*.json", "**/*credentials*", "**/*secret*", "**/*token*"] });
       const matches: Array<{ path: string; line: number; text: string }> = [];
       for (const file of files) {
         const content = await readFile(path.join(rootPath, file), "utf8");
