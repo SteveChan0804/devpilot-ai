@@ -28,7 +28,7 @@ Repository → Scanner → Chunker → Embeddings → PostgreSQL/pgvector
    ollama pull llama3.2
    ```
 
-3. Configure `backend/.env` using the values in `backend/.env.example`.
+3. Configure `backend/.env` using the values in `backend/.env.example`. Keep `HOST=127.0.0.1` for local-only use. If you expose the API on a network interface, set a strong `API_KEY` as well.
 
 4. Start the backend:
 

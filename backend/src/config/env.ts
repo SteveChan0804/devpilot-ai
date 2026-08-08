@@ -5,6 +5,7 @@ dotenv.config();
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
+  HOST: z.string().min(1).default("127.0.0.1"),
   DATABASE_URL: z.string().min(1).default("postgresql://steve:password@localhost:5432/devpilot"),
   OLLAMA_URL: z.string().url().default("http://localhost:11434"),
   OLLAMA_EMBEDDING_MODEL: z.string().min(1).default("nomic-embed-text"),

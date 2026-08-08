@@ -7,7 +7,7 @@ const app = buildApp();
 try {
   const recovered = await recoverInterruptedJobs();
   if (recovered) console.log(`Recovered ${recovered} interrupted indexing jobs`);
-  await app.listen({ port: env.PORT, host: "0.0.0.0" });
+  await app.listen({ port: env.PORT, host: env.HOST });
   console.log(`DevPilot API running at http://localhost:${env.PORT}`);
 } catch (error) {
   app.log.error(error);
