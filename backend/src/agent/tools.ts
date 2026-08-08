@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
@@ -43,6 +43,25 @@ export async function previewWrite(rootPath: string, args: ToolArgs) {
   }
   if (lines.length >= 204) lines.push("… diff truncated …");
   return { path: path.relative(rootPath, filePath), preview: lines.join("\n"), bytes: Buffer.byteLength(next, "utf8") };
+}
+
+export type FileSnapshot = { path: string; existed: boolean; content?: string };
+
+export async function snapshotWrite(rootPath: string, args: ToolArgs): Promise<FileSnapshot> {
+  const relativePath = String(args.path ?? "");
+  assertSafeAgentPath(relativePath);
+  const filePath = resolveWorkspacePath(rootPath, relativePath);
+  try { return { path: relativePath, existed: true, content: await readFile(filePath, "utf8") }; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return { path: relativePath, existed: false };
+  }
+}
+
+export async function restoreSnapshot(rootPath: string, snapshot: FileSnapshot) {
+  const filePath = resolveWorkspacePath(rootPath, snapshot.path);
+  if (snapshot.existed) await writeFile(filePath, snapshot.content ?? "", "utf8");
+  else await unlink(filePath).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
 }
 
 export async function validateWorkspace(rootPath: string) {

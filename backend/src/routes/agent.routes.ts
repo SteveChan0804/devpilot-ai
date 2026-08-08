@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { executeTool, isApprovalTool, toolDefinitions, validateWorkspace } from "../agent/tools.js";
+import { executeTool, isApprovalTool, restoreSnapshot, snapshotWrite, toolDefinitions, validateWorkspace } from "../agent/tools.js";
 import { createApproval, resolveApproval } from "../agent/approvals.js";
 import { getRepositoryRoot } from "../agent/repository.js";
 import { resumeAgentTask, runAgentTask } from "../agent/runner.js";
@@ -86,8 +86,14 @@ export async function agentRoutes(app: FastifyInstance) {
     if (!action.taskId) return reply.code(409).send({ error: "Approval is not linked to an agent task" });
     if (!parsed.data.approved) return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: false });
     const repositoryRoot = await getRepositoryRoot(action.repositoryId);
+    const snapshot = action.tool === "write_file" ? await snapshotWrite(repositoryRoot, action.args) : undefined;
     const result = await executeTool(action.tool, repositoryRoot, action.args);
     const validation = action.tool === "write_file" ? await validateWorkspace(repositoryRoot) : undefined;
-    return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: true, result: { tool: action.tool, result, validation }, validation });
+    let rolledBack = false;
+    if (snapshot && validation && !validation.passed) {
+      await restoreSnapshot(repositoryRoot, snapshot);
+      rolledBack = true;
+    }
+    return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: true, result: { tool: action.tool, result, validation, rolledBack }, validation });
   });
 }

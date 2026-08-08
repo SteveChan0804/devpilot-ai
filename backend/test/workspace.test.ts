@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertSafeAgentPath, resolveWorkspacePath } from "../src/agent/workspace.js";
-import { executeTool, previewWrite, validateWorkspace } from "../src/agent/tools.js";
+import { executeTool, previewWrite, restoreSnapshot, snapshotWrite, validateWorkspace } from "../src/agent/tools.js";
 
 test("workspace guard permits files inside the repository", () => {
   assert.equal(resolveWorkspacePath("C:\\repo", "src\\app.ts"), "C:\\repo\\src\\app.ts");
@@ -55,6 +55,25 @@ test("post-change validation uses the same workspace-safe npm runner", async () 
     assert.equal(result.passed, true);
     assert.equal(result.checks[0].status, "passed");
     assert.match(result.checks[0].output, /validation-ok/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("file snapshots restore existing files and remove new files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "devpilot-rollback-"));
+  try {
+    const existingPath = path.join(root, "existing.ts");
+    await writeFile(existingPath, "before\n", "utf8");
+    const existing = await snapshotWrite(root, { path: "existing.ts" });
+    await writeFile(existingPath, "broken\n", "utf8");
+    await restoreSnapshot(root, existing);
+    assert.equal(await readFile(existingPath, "utf8"), "before\n");
+
+    const created = await snapshotWrite(root, { path: "new.ts" });
+    await writeFile(path.join(root, "new.ts"), "broken\n", "utf8");
+    await restoreSnapshot(root, created);
+    await assert.rejects(() => readFile(path.join(root, "new.ts"), "utf8"), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
