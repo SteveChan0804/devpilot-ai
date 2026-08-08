@@ -31,5 +31,5 @@
   },
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit", "package": "npm run build && vsce package --no-dependencies" },
   "dependencies": {},
-  "devDependencies": { "@types/node": "^22.15.0", "@types/vscode": "^1.99.3", "typescript": "^5.8.3", "@vscode/vsce": "^3.6.0" }
+  "devDependencies": { "@types/node": "^22.15.0", "@types/vscode": "^1.99.3", "typescript": "^7.0.2", "@vscode/vsce": "^3.6.0" }
 }
