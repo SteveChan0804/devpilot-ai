@@ -8,13 +8,17 @@
   "repository": { "type": "git", "url": "https://github.com/devpilot-ai/devpilot-ai" },
   "engines": { "vscode": "^1.99.0" },
   "categories": ["Other", "Machine Learning"],
-  "activationEvents": ["onStartupFinished", "onView:devpilot.chatView"],
+  "activationEvents": ["onStartupFinished", "onView:devpilot.chatView", "onChatParticipant:devpilot-ai.agent"],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       { "command": "devpilot.indexWorkspace", "title": "DevPilot: Index Workspace" },
       { "command": "devpilot.askAboutCode", "title": "DevPilot: Ask About Code" },
-      { "command": "devpilot.explainSelection", "title": "DevPilot: Explain Selection" }
+      { "command": "devpilot.explainSelection", "title": "DevPilot: Explain Selection" },
+      { "command": "devpilot.resolveApproval", "title": "DevPilot: Resolve Agent Approval" }
+    ],
+    "chatParticipants": [
+      { "id": "devpilot-ai.agent", "name": "devpilot", "fullName": "DevPilot AI", "description": "Plan and execute repository-aware engineering tasks with approvals", "isSticky": true }
     ],
     "configuration": {
       "title": "DevPilot AI",

@@ -41,6 +41,34 @@ async function askAboutCode(prompt: string) {
   await vscode.window.showTextDocument(document, { preview: true });
 }
 
+async function resolveAgentApproval(approvalId: string, approved: boolean) {
+  const result = await api<{ status: string; answer?: string }>("/agent/approve", { method: "POST", body: { approvalId, approved } });
+  vscode.window.showInformationMessage(`DevPilot approval ${result.status}.`);
+  return result;
+}
+
+function registerChatParticipant(context: vscode.ExtensionContext) {
+  const participant = vscode.chat.createChatParticipant("devpilot-ai.agent", async (request, _chatContext, response, token) => {
+    if (token.isCancellationRequested) return;
+    try {
+      const repository = await currentRepository();
+      response.progress("Planning repository actions…");
+      const result = await api<{ answer: string; status: string; calls?: Array<{ tool: string; status: string; approvalId?: string }> }>("/agent/run", { method: "POST", body: { repositoryId: repository.id, task: request.prompt, provider: "ollama" } });
+      if (token.isCancellationRequested) return;
+      response.markdown(result.answer);
+      for (const call of result.calls ?? []) {
+        if (call.status !== "approval_required" || !call.approvalId) continue;
+        response.button({ command: "devpilot.resolveApproval", title: `Approve ${call.tool}`, arguments: [call.approvalId, true] });
+        response.button({ command: "devpilot.resolveApproval", title: `Reject ${call.tool}`, arguments: [call.approvalId, false] });
+      }
+    } catch (error) {
+      response.markdown(`DevPilot error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+  participant.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "devpilot.svg");
+  context.subscriptions.push(participant);
+}
+
 class ChatViewProvider implements vscode.WebviewViewProvider {
   constructor(private readonly extensionUri: vscode.Uri) {}
   resolveWebviewView(view: vscode.WebviewView) {
@@ -74,6 +102,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.commands.registerCommand("devpilot.indexWorkspace", () => indexWorkspace().catch((error) => vscode.window.showErrorMessage(String(error)))));
   context.subscriptions.push(vscode.commands.registerCommand("devpilot.askAboutCode", async () => { const prompt = await vscode.window.showInputBox({ prompt: "Ask DevPilot about this workspace" }); if (prompt) await askAboutCode(prompt).catch((error) => vscode.window.showErrorMessage(String(error))); }));
   context.subscriptions.push(vscode.commands.registerCommand("devpilot.explainSelection", async () => { const selection = vscode.window.activeTextEditor?.document.getText(vscode.window.activeTextEditor.selection); if (!selection) return vscode.window.showInformationMessage("Select code first."); await askAboutCode(`Explain this code:\n\n${selection}`).catch((error) => vscode.window.showErrorMessage(String(error))); }));
+  context.subscriptions.push(vscode.commands.registerCommand("devpilot.resolveApproval", (approvalId: string, approved: boolean) => resolveAgentApproval(approvalId, approved).catch((error) => vscode.window.showErrorMessage(String(error)))));
+  registerChatParticipant(context);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("devpilot.chatView", new ChatViewProvider(context.extensionUri)));
 }
 
