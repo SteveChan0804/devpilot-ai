@@ -1,4 +1,14 @@
 node_modules/
 dist/
 backend/.env
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*credentials*
+**/*secrets*
+**/*tokens*
 *.log
