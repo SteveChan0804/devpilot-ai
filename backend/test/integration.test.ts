@@ -61,6 +61,11 @@ test("agent task status route validates and reports missing tasks", async () => 
   assert.equal(missing.statusCode, 404);
 });
 
+test("asynchronous agent job route validates requests", async () => {
+  const response = await app.inject({ method: "POST", url: "/agent/run/jobs", payload: { task: "missing repository" } });
+  assert.equal(response.statusCode, 400);
+});
+
 test("rejecting a linked approval closes the agent task safely", async () => {
   const repository = (await db.insert(repositories).values({ name: "approval-test", rootPath: path.join(os.tmpdir(), `devpilot-approval-${Date.now()}`) }).returning({ id: repositories.id }))[0];
   const task = (await db.insert(agentTasks).values({ repositoryId: repository.id, task: "test approval", provider: "ollama" }).returning({ id: agentTasks.id }))[0];

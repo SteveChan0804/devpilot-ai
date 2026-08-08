@@ -14,6 +14,20 @@ const requestSchema = z.object({ repositoryId: z.string().uuid(), tool: z.enum(t
 const approvalSchema = z.object({ approvalId: z.string().uuid(), approved: z.boolean() });
 const runSchema = z.object({ repositoryId: z.string().uuid(), task: z.string().min(1).max(10_000), provider: z.enum(["ollama", "openrouter"]).default("ollama") });
 
+async function executeStoredTask(taskId: string, repositoryId: string, task: string, provider: "ollama" | "openrouter") {
+  try {
+    const result = await runAgentTask(repositoryId, task, provider, taskId);
+    await db.update(agentTasks).set({ status: result.status, result, ...(result.status === "approval_required" ? {} : { completedAt: new Date() }) }).where(eq(agentTasks.id, taskId));
+    recordMetric(`agent.tasks.${result.status}`);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await db.update(agentTasks).set({ status: "failed", error: message, completedAt: new Date() }).where(eq(agentTasks.id, taskId));
+    recordMetric("agent.tasks.failed");
+    throw error;
+  }
+}
+
 export async function agentRoutes(app: FastifyInstance) {
   app.get("/agent/tools", async () => ({ tools: toolDefinitions }));
 
@@ -23,17 +37,17 @@ export async function agentRoutes(app: FastifyInstance) {
     const taskRow = await db.insert(agentTasks).values({ repositoryId: parsed.data.repositoryId, task: parsed.data.task, provider: parsed.data.provider }).returning({ id: agentTasks.id });
     const taskId = taskRow[0].id;
     recordMetric("agent.tasks.started");
-    try {
-      const result = await runAgentTask(parsed.data.repositoryId, parsed.data.task, parsed.data.provider, taskId);
-      await db.update(agentTasks).set({ status: result.status, result, ...(result.status === "approval_required" ? {} : { completedAt: new Date() }) }).where(eq(agentTasks.id, taskId));
-      recordMetric(`agent.tasks.${result.status}`);
-      return { taskId, ...result };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await db.update(agentTasks).set({ status: "failed", error: message, completedAt: new Date() }).where(eq(agentTasks.id, taskId));
-      recordMetric("agent.tasks.failed");
-      throw error;
-    }
+    return { taskId, ...(await executeStoredTask(taskId, parsed.data.repositoryId, parsed.data.task, parsed.data.provider)) };
+  });
+
+  app.post("/agent/run/jobs", async (request, reply) => {
+    const parsed = runSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const taskRow = await db.insert(agentTasks).values({ repositoryId: parsed.data.repositoryId, task: parsed.data.task, provider: parsed.data.provider }).returning({ id: agentTasks.id });
+    const taskId = taskRow[0].id;
+    recordMetric("agent.tasks.started");
+    void executeStoredTask(taskId, parsed.data.repositoryId, parsed.data.task, parsed.data.provider).catch(() => undefined);
+    return reply.code(202).send({ taskId, status: "running" });
   });
 
   app.get("/agent/tasks/:repositoryId", async (request, reply) => {

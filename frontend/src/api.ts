@@ -53,9 +53,22 @@ export async function streamChat(repositoryId: string, message: string, onToken:
 }
 
 export async function runAgent(repositoryId: string, task: string) {
-  const response = await fetch(`${base}/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repositoryId, task, provider: "ollama" }) });
+  const response = await fetch(`${base}/agent/run/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repositoryId, task, provider: "ollama" }) });
   if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<{ answer: string; status: string; calls?: AgentCall[] }>;
+  const started = await response.json() as { taskId: string };
+  for (let attempt = 0; attempt < 1_200; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const taskResponse = await fetch(`${base}/agent/task/${started.taskId}`);
+    if (!taskResponse.ok) throw new Error(await taskResponse.text());
+    const payload = await taskResponse.json() as { task: { status: string; error?: string; result?: { answer?: string; status?: string; calls?: AgentCall[] } } };
+    const current = payload.task;
+    if (["completed", "approval_required", "rejected", "validation_failed", "needs_clarification"].includes(current.status)) {
+      if (current.status === "failed") throw new Error(current.error ?? "Agent task failed");
+      return { taskId: started.taskId, status: current.status, answer: current.result?.answer ?? current.error ?? "Agent task finished.", calls: current.result?.calls };
+    }
+    if (current.status === "failed") throw new Error(current.error ?? "Agent task failed");
+  }
+  throw new Error("Agent task timed out");
 }
 
 export async function resolveAgentApproval(approvalId: string, approved: boolean) {
