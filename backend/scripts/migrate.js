@@ -6,7 +6,7 @@ const client = new Client({ connectionString });
 
 try {
   await client.connect();
-for (const file of ["0003_repository_vectors.sql", "0004_agent_approvals.sql", "0005_index_jobs.sql", "0006_agent_tasks.sql", "0005_agent_approval_tasks.sql"]) {
+for (const file of ["0003_repository_vectors.sql", "0004_agent_approvals.sql", "0005_index_jobs.sql", "0006_agent_tasks.sql", "0005_agent_approval_tasks.sql", "0007_document_languages.sql"]) {
     const migration = await fs.readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8");
     await client.query(migration);
   }

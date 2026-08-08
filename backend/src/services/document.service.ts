@@ -9,6 +9,11 @@ function hash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function languageForPath(filePath: string) {
+  const extension = filePath.toLowerCase().split(".").pop();
+  return extension ? ({ ts: "typescript", tsx: "typescriptreact", js: "javascript", jsx: "javascriptreact", json: "json", md: "markdown" } as Record<string, string>)[extension] ?? extension : undefined;
+}
+
 export async function upsertRepository(name: string, rootPath: string) {
   const existing = await db.select().from(repositories).where(eq(repositories.rootPath, rootPath));
   if (existing[0]) {
@@ -41,9 +46,10 @@ export async function syncRepository(repositoryId: string, files: ScannedFile[],
       path: file.path,
       content: file.content,
       contentHash,
+      language: languageForPath(file.path),
     }).onConflictDoUpdate({
       target: [documents.repositoryId, documents.path],
-      set: { content: file.content, contentHash, updatedAt: new Date() },
+      set: { content: file.content, contentHash, language: languageForPath(file.path), updatedAt: new Date() },
     }).returning();
     const documentId = document[0].id;
     await db.delete(chunks).where(eq(chunks.documentId, documentId));
