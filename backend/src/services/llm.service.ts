@@ -4,10 +4,10 @@ import { recordMetric } from "./metrics.service.js";
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 export type LlmProvider = "ollama" | "openrouter";
 
-export async function completeChat(provider: LlmProvider, messages: ChatMessage[]): Promise<string> {
+export async function completeChat(provider: LlmProvider, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
   recordMetric(`llm.${provider}.requests`);
   try {
-    const result = provider === "openrouter" ? await completeOpenRouter(messages) : await completeOllama(messages);
+    const result = provider === "openrouter" ? await completeOpenRouter(messages, signal) : await completeOllama(messages, signal);
     recordMetric(`llm.${provider}.successes`);
     return result;
   } catch (error) {
@@ -42,18 +42,18 @@ export async function* streamChat(provider: LlmProvider, messages: ChatMessage[]
   }
 }
 
-async function completeOllama(messages: ChatMessage[]) {
-  const response = await ollamaResponse(messages, AbortSignal.timeout(120_000), false);
+async function completeOllama(messages: ChatMessage[], signal?: AbortSignal) {
+  const response = await ollamaResponse(messages, signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000), false);
   if (!response.ok) throw new Error(`Ollama chat failed (${response.status})`);
   const payload = (await response.json()) as { message?: { content?: string } };
   return payload.message?.content ?? "";
 }
 
-async function completeOpenRouter(messages: ChatMessage[]) {
+async function completeOpenRouter(messages: ChatMessage[], signal?: AbortSignal) {
   if (!env.OPENROUTER_API_KEY || env.OPENROUTER_API_KEY === "your_key_here") {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }
-  const response = await openRouterResponse(messages, AbortSignal.timeout(120_000), false);
+  const response = await openRouterResponse(messages, signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000), false);
   if (!response.ok) throw new Error(`OpenRouter chat failed (${response.status})`);
   const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return payload.choices?.[0]?.message?.content ?? "";

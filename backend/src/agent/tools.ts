@@ -94,7 +94,7 @@ async function packageHasScript(directory: string, script: string) {
   } catch { return false; }
 }
 
-export async function executeTool(tool: AgentTool, rootPath: string, args: ToolArgs) {
+export async function executeTool(tool: AgentTool, rootPath: string, args: ToolArgs, signal?: AbortSignal) {
   switch (tool) {
     case "list_files": {
       const files = await fg(["**/*"], { cwd: rootPath, onlyFiles: true, ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/dist-test/**", "**/.env*", "**/*.{pem,key,p12,pfx,crt,cer}", "**/*credentials*", "**/*secret*", "**/*token*"] });
@@ -120,11 +120,11 @@ export async function executeTool(tool: AgentTool, rootPath: string, args: ToolA
       return { matches };
     }
     case "get_git_status": {
-      const result = await execFileAsync("git", ["status", "--short"], { cwd: rootPath, timeout: 15_000, maxBuffer: 100_000 });
+      const result = await execFileAsync("git", ["status", "--short"], { cwd: rootPath, timeout: 15_000, maxBuffer: 100_000, signal });
       return { output: result.stdout };
     }
     case "get_git_diff": {
-      const result = await execFileAsync("git", ["diff", "--no-ext-diff", "--", "."], { cwd: rootPath, timeout: 15_000, maxBuffer: 500_000 });
+      const result = await execFileAsync("git", ["diff", "--no-ext-diff", "--", "."], { cwd: rootPath, timeout: 15_000, maxBuffer: 500_000, signal });
       return { output: result.stdout.slice(0, 500_000) };
     }
     case "write_file": {

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { executeTool, isApprovalTool, restoreSnapshot, snapshotWrite, toolDefinitions, validateWorkspace } from "../agent/tools.js";
 import { createApproval, resolveApproval } from "../agent/approvals.js";
 import { getRepositoryRoot } from "../agent/repository.js";
-import { resumeAgentTask, runAgentTask } from "../agent/runner.js";
+import { cancelAgentTask, resumeAgentTask, runAgentTask } from "../agent/runner.js";
 import { agentApprovals, agentTasks } from "../db/schema.js";
 import { db } from "../db/client.js";
 import { and, eq, gt } from "drizzle-orm";
@@ -22,6 +22,8 @@ async function executeStoredTask(taskId: string, repositoryId: string, task: str
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const current = (await db.select({ status: agentTasks.status }).from(agentTasks).where(eq(agentTasks.id, taskId)))[0];
+    if (current?.status === "cancelled") return { status: "cancelled", answer: "The agent task was cancelled." };
     await db.update(agentTasks).set({ status: "failed", error: message, completedAt: new Date() }).where(eq(agentTasks.id, taskId));
     recordMetric("agent.tasks.failed");
     throw error;
@@ -62,6 +64,20 @@ export async function agentRoutes(app: FastifyInstance) {
     const rows = await db.select().from(agentTasks).where(eq(agentTasks.id, parsed.data.taskId));
     if (!rows[0]) return reply.code(404).send({ error: "Agent task not found" });
     return { task: rows[0] };
+  });
+
+  app.post("/agent/task/:taskId/cancel", async (request, reply) => {
+    const parsed = z.object({ taskId: z.string().uuid() }).safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const rows = await db.select().from(agentTasks).where(eq(agentTasks.id, parsed.data.taskId));
+    const task = rows[0];
+    if (!task) return reply.code(404).send({ error: "Agent task not found" });
+    if (["completed", "failed", "rejected", "cancelled", "validation_failed"].includes(task.status)) return { status: task.status, cancelled: false };
+    cancelAgentTask(task.id);
+    await db.update(agentApprovals).set({ status: "rejected", resolvedAt: new Date() }).where(and(eq(agentApprovals.taskId, task.id), eq(agentApprovals.status, "pending")));
+    await db.update(agentTasks).set({ status: "cancelled", completedAt: new Date() }).where(eq(agentTasks.id, task.id));
+    recordMetric("agent.tasks.cancelled");
+    return { status: "cancelled", cancelled: true };
   });
 
   app.get("/agent/approvals/:repositoryId", async (request, reply) => {

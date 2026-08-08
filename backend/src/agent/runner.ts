@@ -13,6 +13,7 @@ const planSchema = z.object({
 });
 const MAX_PLAN_CALLS = 5;
 const readOnlyTools = new Set(["list_files", "read_file", "search_code", "get_git_status", "get_git_diff"]);
+const activeTasks = new Map<string, AbortController>();
 
 function parseTolerantReadOnlyPlan(text: string): AgentPlan | undefined {
   const calls: Array<{ tool: AgentTool; args: Record<string, string | number> }> = [];
@@ -37,6 +38,13 @@ function parseTolerantReadOnlyPlan(text: string): AgentPlan | undefined {
 export type AgentPlan = z.infer<typeof planSchema>;
 type AgentCallResult = { tool: AgentTool; status: string; result?: unknown; approvalId?: string; error?: string };
 export type AgentDependencies = { completeChat: typeof completeChat; retrieveChunks: typeof retrieveChunks };
+
+export function cancelAgentTask(taskId: string) {
+  const controller = activeTasks.get(taskId);
+  if (!controller) return false;
+  controller.abort();
+  return true;
+}
 
 export function parseAgentPlan(text: string): AgentPlan | undefined {
   const cleaned = text.replace(/```(?:json)?/gi, "").replace(/```/g, "");
@@ -66,27 +74,35 @@ function hasMutationIntent(task: string) {
 }
 
 export async function runAgentTask(repositoryId: string, task: string, provider: LlmProvider, taskId?: string, dependencies: AgentDependencies = { completeChat, retrieveChunks }) {
+  const controller = taskId ? new AbortController() : undefined;
+  if (taskId) activeTasks.set(taskId, controller!);
+  const signal = controller?.signal;
+  const checkCancelled = () => { if (signal?.aborted) throw new DOMException("Agent task cancelled", "AbortError"); };
+  try {
+    checkCancelled();
   const sources = await dependencies.retrieveChunks(repositoryId, task, 6);
+  checkCancelled();
   const repositoryRoot = await getRepositoryRoot(repositoryId);
   const context = sources.map((source) => `FILE ${source.path}:${source.startLine}-${source.endLine}\n${source.content}`).join("\n\n").slice(0, 16_000);
   const plannerMessages: ChatMessage[] = [
     { role: "system", content: `You are DevPilot's planning engine. Return ONLY valid JSON with this shape: {"calls":[{"tool":"read_file","args":{"path":"src/file.ts"}}]}. Choose at most 5 tools. For questions asking where code is implemented or how it works, use search_code and then read_file on the best matching path; list_files alone is insufficient. Read-only tools may execute automatically. write_file and run_command require approval. Available tools: ${JSON.stringify(toolDefinitions)}. Never invent paths; use context or list_files first.` },
     { role: "user", content: `Task: ${task}\n\nRepository context:\n${context || "No context found."}` },
   ];
-  const plannerResponse = await dependencies.completeChat(provider, plannerMessages);
+  const plannerResponse = await dependencies.completeChat(provider, plannerMessages, signal);
   const plan = parseAgentPlan(plannerResponse);
   if (!plan) return { status: "needs_clarification", answer: plannerResponse, sources, calls: [] };
 
   const results: Array<{ tool: AgentTool; status: string; result?: unknown; approvalId?: string; error?: string }> = [];
   for (const call of plan.calls) {
     try {
+      checkCancelled();
       const args = { ...call.args };
       if (call.tool === "search_code" && !args.query) args.query = fallbackSearchQuery(task);
       if (isApprovalTool(call.tool)) {
         const preview = call.tool === "write_file" ? await previewWrite(repositoryRoot, args) : { command: args.command };
         results.push({ tool: call.tool, status: "approval_required", approvalId: await createApproval({ taskId, repositoryId, tool: call.tool, args }), result: { args, preview } });
       }
-      else results.push({ tool: call.tool, status: "completed", result: await executeTool(call.tool, repositoryRoot, args) });
+      else results.push({ tool: call.tool, status: "completed", result: await executeTool(call.tool, repositoryRoot, args, signal) });
     } catch (error) {
       results.push({ tool: call.tool, status: "failed", error: error instanceof Error ? error.message : String(error) });
     }
@@ -94,17 +110,21 @@ export async function runAgentTask(repositoryId: string, task: string, provider:
 
   const hasUsefulEvidence = results.some((result) => result.status === "completed" && (result.tool === "search_code" || result.tool === "read_file"));
   if (!hasUsefulEvidence && /\b(where|how|explain|find|which)\b/i.test(task)) {
-    try { results.push({ tool: "search_code", status: "completed", result: await executeTool("search_code", repositoryRoot, { query: fallbackSearchQuery(task) }) }); }
+    try { checkCancelled(); results.push({ tool: "search_code", status: "completed", result: await executeTool("search_code", repositoryRoot, { query: fallbackSearchQuery(task) }, signal) }); }
     catch (error) { results.push({ tool: "search_code", status: "failed", error: error instanceof Error ? error.message : String(error) }); }
   }
 
   if (results.some((result) => result.status === "approval_required")) return { status: "approval_required", answer: "I need your approval before I can perform the requested changes or commands.", sources, calls: results };
   if (hasMutationIntent(task)) return { status: "approval_required", answer: "This task requests a change or command, but the planner did not produce a safe actionable proposal. No changes were made. Please review the requested operation and try again.", sources, calls: results };
+  checkCancelled();
   const final = await dependencies.completeChat(provider, [
     { role: "system", content: "You are DevPilot, an engineering agent. Answer only from the repository context and tool results below. Every file or line citation must appear in that evidence. Never invent a path, module, or implementation detail. If evidence is insufficient, explicitly say so. Do not claim actions that failed." },
     { role: "user", content: `Task: ${task}\n\nRepository context:\n${context}\n\nTool results:\n${JSON.stringify(results).slice(0, 24_000)}` },
-  ]);
+  ], signal);
   return { status: "completed", answer: final, sources, calls: results };
+  } finally {
+    if (taskId && activeTasks.get(taskId) === controller) activeTasks.delete(taskId);
+  }
 }
 
 function taskContext(sources: Array<{ path: string; startLine: number; endLine: number; content: string }>) {
