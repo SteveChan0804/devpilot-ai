@@ -65,6 +65,13 @@ export async function validateWorkspace(rootPath: string) {
   return { checks, passed: checks.every((check) => check.status === "passed") };
 }
 
+async function packageHasScript(directory: string, script: string) {
+  try {
+    const packageJson = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8")) as { scripts?: Record<string, string> };
+    return Boolean(packageJson.scripts?.[script]);
+  } catch { return false; }
+}
+
 export async function executeTool(tool: AgentTool, rootPath: string, args: ToolArgs) {
   switch (tool) {
     case "list_files": {
@@ -104,16 +111,25 @@ export async function executeTool(tool: AgentTool, rootPath: string, args: ToolA
     }
     case "run_command": {
       const command = String(args.command ?? "");
-      const allowed: Record<string, [string, string[]]> = {
-        "npm test": [process.platform === "win32" ? "npm.cmd" : "npm", ["test"]],
-        "npm run build": [process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"]],
-        "npm run typecheck": [process.platform === "win32" ? "npm.cmd" : "npm", ["run", "typecheck"]],
-        "git status": ["git", ["status", "--short"]],
-      };
-      const selected = allowed[command];
-      if (!selected) throw new Error("Command is not on the DevPilot allowlist");
-      const result = await execFileAsync(selected[0], selected[1], { cwd: rootPath, timeout: 120_000, maxBuffer: 500_000 });
-      return { command, output: `${result.stdout}${result.stderr}`.slice(0, 500_000) };
+      if (command === "git status") {
+        const result = await execFileAsync("git", ["status", "--short"], { cwd: rootPath, timeout: 15_000, maxBuffer: 100_000 });
+        return { command, output: result.stdout };
+      }
+      const script = command === "npm test" ? "test" : command.match(/^npm run (build|typecheck)$/)?.[1];
+      if (!script) throw new Error("Command is not on the DevPilot allowlist");
+      const directories = [rootPath, path.join(rootPath, "backend"), path.join(rootPath, "frontend"), path.join(rootPath, "extension")];
+      const targets = [];
+      for (const directory of directories) if (await packageHasScript(directory, script)) targets.push(directory);
+      if (targets.length === 0) throw new Error(`No package provides the ${script} script`);
+      const executable = process.platform === "win32" ? "cmd.exe" : "npm";
+      const outputs: string[] = [];
+      for (const directory of targets) {
+        const npmArguments = script === "test" ? "test" : `run ${script}`;
+        const commandArguments = process.platform === "win32" ? ["/d", "/s", "/c", `npm.cmd ${npmArguments}`] : npmArguments.split(" ");
+        const result = await execFileAsync(executable, commandArguments, { cwd: directory, timeout: 120_000, maxBuffer: 500_000 });
+        outputs.push(`[${path.relative(rootPath, directory) || "."}]\n${result.stdout}${result.stderr}`);
+      }
+      return { command, directories: targets.map((directory) => path.relative(rootPath, directory) || "."), output: outputs.join("\n").slice(0, 500_000) };
     }
   }
 }
