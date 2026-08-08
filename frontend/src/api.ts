@@ -1,5 +1,6 @@
 export type Repository = { id: string; name: string; rootPath: string; status: string; lastIndexedAt?: string };
 export type Source = { id: string; path: string; startLine: number; endLine: number; content: string; similarity: number };
+export type AgentCall = { tool: string; status: string; approvalId?: string; result?: { preview?: unknown } };
 
 const base = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -40,4 +41,16 @@ export async function streamChat(repositoryId: string, message: string, onToken:
       if (event.includes("event: error")) throw new Error(data.error);
     }
   }
+}
+
+export async function runAgent(repositoryId: string, task: string) {
+  const response = await fetch(`${base}/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repositoryId, task, provider: "ollama" }) });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<{ answer: string; status: string; calls?: AgentCall[] }>;
+}
+
+export async function resolveAgentApproval(approvalId: string, approved: boolean) {
+  const response = await fetch(`${base}/agent/approve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approvalId, approved }) });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<{ status: string; result?: unknown }>;
 }
