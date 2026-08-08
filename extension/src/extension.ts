@@ -32,7 +32,10 @@ type AgentResult = { answer: string; status: string; calls?: Array<{ tool: strin
 async function runAgentJob(repositoryId: string, task: string, token?: vscode.CancellationToken): Promise<AgentResult> {
   const started = await api<{ taskId: string }>("/agent/run/jobs", { method: "POST", body: { repositoryId, task, provider: "ollama" } });
   for (let attempt = 0; attempt < 1_200; attempt++) {
-    if (token?.isCancellationRequested) return { status: "cancelled", answer: "DevPilot task cancelled." };
+    if (token?.isCancellationRequested) {
+      await api(`/agent/task/${started.taskId}/cancel`, { method: "POST" }).catch(() => undefined);
+      return { status: "cancelled", answer: "DevPilot task cancelled." };
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
     const response = await api<{ task: { status: string; error?: string; result?: AgentResult } }>(`/agent/task/${started.taskId}`);
     const taskState = response.task;
