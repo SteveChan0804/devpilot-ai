@@ -20,6 +20,6 @@ export async function resolveApproval(id: string, approved: boolean) {
   const rows = await db.update(agentApprovals)
     .set({ status: approved ? "approved" : "rejected", resolvedAt: new Date() })
     .where(and(eq(agentApprovals.id, id), eq(agentApprovals.status, "pending"), gt(agentApprovals.expiresAt, new Date())))
-    .returning({ repositoryId: agentApprovals.repositoryId, tool: agentApprovals.tool, args: agentApprovals.args });
-  return rows[0] as { repositoryId: string; tool: AgentTool; args: ToolArgs } | undefined;
+  .returning({ taskId: agentApprovals.taskId, repositoryId: agentApprovals.repositoryId, tool: agentApprovals.tool, args: agentApprovals.args });
+  return rows[0] as { taskId: string | null; repositoryId: string; tool: AgentTool; args: ToolArgs } | undefined;
 }

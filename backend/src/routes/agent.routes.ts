@@ -61,8 +61,12 @@ export async function agentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const action = await resolveApproval(parsed.data.approvalId, parsed.data.approved);
     if (!action) return reply.code(404).send({ error: "Approval request not found or expired" });
-    if (!parsed.data.approved) return { status: "rejected", tool: action.tool };
+    if (!parsed.data.approved) {
+      if (action.taskId) await db.update(agentTasks).set({ status: "rejected", completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
+      return { status: "rejected", tool: action.tool, taskId: action.taskId };
+    }
     const result = await executeTool(action.tool, await getRepositoryRoot(action.repositoryId), action.args);
-    return { status: "completed", tool: action.tool, result };
+    if (action.taskId) await db.update(agentTasks).set({ status: "completed", result: { approval: { tool: action.tool, result } }, completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
+    return { status: "completed", tool: action.tool, taskId: action.taskId, result };
   });
 }
