@@ -88,10 +88,11 @@ export async function resumeAgentTask(action: { id: string; taskId: string; repo
   const call = calls.find((item) => item.approvalId === action.id);
   if (call) {
     call.status = action.approved ? (action.validation && (action.validation as { passed?: boolean }).passed === false ? "validation_failed" : "completed") : "rejected";
-    call.result = action.result ?? action.validation;
+    call.result = { result: action.result, validation: action.validation };
   }
   const updatedResult = { ...previous, calls };
   if (!action.approved) {
+    await db.update(agentApprovals).set({ status: "rejected", resolvedAt: new Date() }).where(and(eq(agentApprovals.taskId, action.taskId), eq(agentApprovals.status, "pending")));
     await db.update(agentTasks).set({ status: "rejected", result: updatedResult, completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
     return { status: "rejected", answer: "The requested action was rejected. No further changes were made.", calls };
   }

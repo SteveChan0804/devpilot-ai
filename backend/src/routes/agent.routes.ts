@@ -66,6 +66,6 @@ export async function agentRoutes(app: FastifyInstance) {
     const repositoryRoot = await getRepositoryRoot(action.repositoryId);
     const result = await executeTool(action.tool, repositoryRoot, action.args);
     const validation = action.tool === "write_file" ? await validateWorkspace(repositoryRoot) : undefined;
-    return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: true, result: { tool: action.tool, result }, validation });
+    return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: true, result: { tool: action.tool, result, validation }, validation });
   });
 }
