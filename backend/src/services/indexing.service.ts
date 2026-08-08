@@ -21,13 +21,20 @@ export async function runIndexing(repositoryId: string, rootPath: string, jobId?
     await updateJob({ totalFiles: files.length, totalChunks: chunks.length });
     const syncResult = await syncRepository(repositoryId, files, chunks);
     let embeddedChunks = 0;
-    for (const item of syncResult.embeddingTasks) {
-      const embedding = await embedText(item.content);
-      await db.update(chunksTable).set({ embedding, embeddingModel: env.OLLAMA_EMBEDDING_MODEL }).where(eq(chunksTable.id, item.id));
-      embeddedChunks++;
-      recordMetric("indexing.embedded_chunks");
-      await updateJob({ embeddedChunks });
-    }
+    let nextTask = 0;
+    const worker = async () => {
+      while (true) {
+        const index = nextTask++;
+        const item = syncResult.embeddingTasks[index];
+        if (!item) return;
+        const embedding = await embedText(item.content);
+        await db.update(chunksTable).set({ embedding, embeddingModel: env.OLLAMA_EMBEDDING_MODEL }).where(eq(chunksTable.id, item.id));
+        embeddedChunks++;
+        recordMetric("indexing.embedded_chunks");
+        await updateJob({ embeddedChunks });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(env.EMBEDDING_CONCURRENCY, syncResult.embeddingTasks.length) }, () => worker()));
     const result = { repositoryId, rootPath, files: files.length, chunks: chunks.length, embeddedChunks, removedFiles: syncResult.removedFiles, status: "indexed" as const };
     await db.update(repositories).set({ status: "indexed", lastIndexedAt: new Date() }).where(eq(repositories.id, repositoryId));
     await updateJob({ embeddedChunks, removedFiles: syncResult.removedFiles, status: "completed", completedAt: new Date() });
