@@ -14,6 +14,7 @@ const planSchema = z.object({
 
 export type AgentPlan = z.infer<typeof planSchema>;
 type AgentCallResult = { tool: AgentTool; status: string; result?: unknown; approvalId?: string; error?: string };
+export type AgentDependencies = { completeChat: typeof completeChat; retrieveChunks: typeof retrieveChunks };
 
 export function parseAgentPlan(text: string): AgentPlan | undefined {
   const cleaned = text.replace(/```(?:json)?/gi, "").replace(/```/g, "");
@@ -33,15 +34,15 @@ function hasMutationIntent(task: string) {
   return /\b(modify|change|edit|write|create|delete|remove|refactor|run tests?|run command|execute)\b/i.test(task);
 }
 
-export async function runAgentTask(repositoryId: string, task: string, provider: LlmProvider, taskId?: string) {
-  const sources = await retrieveChunks(repositoryId, task, 6);
+export async function runAgentTask(repositoryId: string, task: string, provider: LlmProvider, taskId?: string, dependencies: AgentDependencies = { completeChat, retrieveChunks }) {
+  const sources = await dependencies.retrieveChunks(repositoryId, task, 6);
   const repositoryRoot = await getRepositoryRoot(repositoryId);
   const context = sources.map((source) => `FILE ${source.path}:${source.startLine}-${source.endLine}\n${source.content}`).join("\n\n").slice(0, 16_000);
   const plannerMessages: ChatMessage[] = [
     { role: "system", content: `You are DevPilot's planning engine. Return ONLY valid JSON with this shape: {"calls":[{"tool":"read_file","args":{"path":"src/file.ts"}}]}. Choose at most 5 tools. For questions asking where code is implemented or how it works, use search_code and then read_file on the best matching path; list_files alone is insufficient. Read-only tools may execute automatically. write_file and run_command require approval. Available tools: ${JSON.stringify(toolDefinitions)}. Never invent paths; use context or list_files first.` },
     { role: "user", content: `Task: ${task}\n\nRepository context:\n${context || "No context found."}` },
   ];
-  const plannerResponse = await completeChat(provider, plannerMessages);
+  const plannerResponse = await dependencies.completeChat(provider, plannerMessages);
   const plan = parseAgentPlan(plannerResponse);
   if (!plan) return { status: "needs_clarification", answer: plannerResponse, sources, calls: [] };
 
@@ -68,7 +69,7 @@ export async function runAgentTask(repositoryId: string, task: string, provider:
 
   if (results.some((result) => result.status === "approval_required")) return { status: "approval_required", answer: "I need your approval before I can perform the requested changes or commands.", sources, calls: results };
   if (hasMutationIntent(task)) return { status: "approval_required", answer: "This task requests a change or command, but the planner did not produce a safe actionable proposal. No changes were made. Please review the requested operation and try again.", sources, calls: results };
-  const final = await completeChat(provider, [
+  const final = await dependencies.completeChat(provider, [
     { role: "system", content: "You are DevPilot, an engineering agent. Answer only from the repository context and tool results below. Every file or line citation must appear in that evidence. Never invent a path, module, or implementation detail. If evidence is insufficient, explicitly say so. Do not claim actions that failed." },
     { role: "user", content: `Task: ${task}\n\nRepository context:\n${context}\n\nTool results:\n${JSON.stringify(results).slice(0, 24_000)}` },
   ]);
