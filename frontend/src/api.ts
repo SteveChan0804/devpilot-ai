@@ -11,11 +11,20 @@ export async function getRepositories(): Promise<Repository[]> {
 }
 
 export async function indexRepository(rootPath: string, name?: string) {
-  const response = await fetch(`${base}/repositories/index`, {
+  const response = await fetch(`${base}/repositories/index/jobs`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rootPath, name }),
   });
   if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<{ repositoryId: string; files: number; chunks: number; embeddedChunks: number; status: string }>;
+  const job = await response.json() as { jobId: string; repositoryId: string };
+  for (let attempt = 0; attempt < 1_200; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const statusResponse = await fetch(`${base}/index-jobs/${job.jobId}`);
+    if (!statusResponse.ok) throw new Error(await statusResponse.text());
+    const status = await statusResponse.json() as { status: string; totalFiles: number; totalChunks: number; embeddedChunks: number; error?: string };
+    if (status.status === "completed") return { repositoryId: job.repositoryId, files: status.totalFiles, chunks: status.totalChunks, embeddedChunks: status.embeddedChunks, status: status.status };
+    if (status.status === "failed") throw new Error(status.error ?? "Repository indexing failed");
+  }
+  throw new Error("Repository indexing timed out");
 }
 
 export async function streamChat(repositoryId: string, message: string, onToken: (token: string) => void, onSources: (sources: Source[]) => void) {

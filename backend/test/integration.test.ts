@@ -34,6 +34,13 @@ test("repository and metrics contracts are available", async () => {
   assert.ok(metrics.json().metrics);
 });
 
+test("asynchronous indexing job routes validate requests", async () => {
+  const invalidCreate = await app.inject({ method: "POST", url: "/repositories/index/jobs", payload: { rootPath: "" } });
+  assert.equal(invalidCreate.statusCode, 400);
+  const invalidStatus = await app.inject({ method: "GET", url: "/index-jobs/not-a-uuid" });
+  assert.equal(invalidStatus.statusCode, 400);
+});
+
 test("agent tools are exposed and malformed tool input is rejected", async () => {
   const tools = await app.inject({ method: "GET", url: "/agent/tools" });
   assert.equal(tools.statusCode, 200);
