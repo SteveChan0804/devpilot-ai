@@ -26,6 +26,21 @@ async function currentRepository(): Promise<Repository> {
   return repository;
 }
 
+type AgentResult = { answer: string; status: string; calls?: Array<{ tool: string; status: string; approvalId?: string; result?: unknown }> };
+
+async function runAgentJob(repositoryId: string, task: string, token?: vscode.CancellationToken): Promise<AgentResult> {
+  const started = await api<{ taskId: string }>("/agent/run/jobs", { method: "POST", body: { repositoryId, task, provider: "ollama" } });
+  for (let attempt = 0; attempt < 1_200; attempt++) {
+    if (token?.isCancellationRequested) return { status: "cancelled", answer: "DevPilot task cancelled." };
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const response = await api<{ task: { status: string; error?: string; result?: AgentResult } }>(`/agent/task/${started.taskId}`);
+    const taskState = response.task;
+    if (["completed", "approval_required", "rejected", "validation_failed", "needs_clarification"].includes(taskState.status)) return taskState.result ?? { status: taskState.status, answer: taskState.error ?? "DevPilot task finished." };
+    if (taskState.status === "failed") throw new Error(taskState.error ?? "DevPilot task failed");
+  }
+  throw new Error("DevPilot task timed out");
+}
+
 async function indexWorkspace() {
   const rootPath = workspacePath();
   await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "DevPilot: indexing workspace" }, async () => {
@@ -53,7 +68,7 @@ function registerChatParticipant(context: vscode.ExtensionContext) {
     try {
       const repository = await currentRepository();
       response.progress("Planning repository actions…");
-      const result = await api<{ answer: string; status: string; calls?: Array<{ tool: string; status: string; approvalId?: string }> }>("/agent/run", { method: "POST", body: { repositoryId: repository.id, task: request.prompt, provider: "ollama" } });
+      const result = await runAgentJob(repository.id, request.prompt, token);
       if (token.isCancellationRequested) return;
       response.markdown(result.answer);
       for (const call of result.calls ?? []) {
@@ -89,7 +104,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
           return;
         }
         if (message.type !== "ask") return;
-        const result = await api<{ answer: string; status: string; calls?: Array<{ tool: string; status: string; approvalId?: string; result?: unknown }> }>("/agent/run", { method: "POST", body: { repositoryId: repository.id, task: message.q, provider: "ollama" } });
+        const result = await runAgentJob(repository.id, message.q);
         view.webview.postMessage({ answer: result.answer, status: result.status, approvals: (result.calls ?? []).filter((call) => call.status === "approval_required" && call.approvalId).map((call) => ({ ...call, args: (call.result as { args?: unknown } | undefined)?.args, preview: (call.result as { preview?: unknown } | undefined)?.preview })) });
       } catch (error) {
         view.webview.postMessage({ answer: String(error), status: "Action failed" });
