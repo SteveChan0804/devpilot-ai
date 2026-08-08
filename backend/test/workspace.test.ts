@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveWorkspacePath } from "../src/agent/workspace.js";
+import { assertSafeAgentPath, resolveWorkspacePath } from "../src/agent/workspace.js";
 import { previewWrite } from "../src/agent/tools.js";
 
 test("workspace guard permits files inside the repository", () => {
@@ -12,6 +12,12 @@ test("workspace guard permits files inside the repository", () => {
 
 test("workspace guard rejects traversal", () => {
   assert.throws(() => resolveWorkspacePath("C:\\repo", "..\\secrets.txt"), /escapes/);
+});
+
+test("agent path guard rejects secrets and dependency folders", () => {
+  assert.throws(() => assertSafeAgentPath(".env"), /Sensitive/);
+  assert.throws(() => assertSafeAgentPath("config/credentials.json"), /Sensitive/);
+  assert.throws(() => assertSafeAgentPath("node_modules/pkg/index.js"), /Sensitive/);
 });
 
 test("write previews stay inside the workspace and show changed lines", async () => {

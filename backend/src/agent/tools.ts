@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
-import { assertReasonableSize, resolveWorkspacePath } from "./workspace.js";
+import { assertReasonableSize, assertSafeAgentPath, resolveWorkspacePath } from "./workspace.js";
 
 const execFileAsync = promisify(execFile);
 export type AgentTool = "list_files" | "read_file" | "search_code" | "get_git_status" | "write_file" | "run_command";
@@ -22,6 +22,7 @@ export type ToolArgs = Record<string, string | number | undefined>;
 export function isApprovalTool(tool: AgentTool) { return tool === "write_file" || tool === "run_command"; }
 
 export async function previewWrite(rootPath: string, args: ToolArgs) {
+  assertSafeAgentPath(String(args.path ?? ""));
   const filePath = resolveWorkspacePath(rootPath, String(args.path ?? ""));
   const next = String(args.content ?? "");
   assertReasonableSize(next);
@@ -67,11 +68,12 @@ export async function validateWorkspace(rootPath: string) {
 export async function executeTool(tool: AgentTool, rootPath: string, args: ToolArgs) {
   switch (tool) {
     case "list_files": {
-      const files = await fg(["**/*"], { cwd: rootPath, onlyFiles: true, ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/dist-test/**"] });
+      const files = await fg(["**/*"], { cwd: rootPath, onlyFiles: true, ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/dist-test/**", "**/.env*", "**/*.{pem,key,p12,pfx,crt,cer}", "**/*credentials*", "**/*secret*", "**/*token*"] });
       return { files: files.slice(0, 2_000) };
     }
     case "read_file": {
       const requestedPath = String(args.path ?? "").replace(/:\d+(?:-\d+)?$/, "");
+      assertSafeAgentPath(requestedPath);
       const filePath = resolveWorkspacePath(rootPath, requestedPath);
       const content = await readFile(filePath, "utf8");
       assertReasonableSize(content);
@@ -80,7 +82,7 @@ export async function executeTool(tool: AgentTool, rootPath: string, args: ToolA
     case "search_code": {
       const query = String(args.query ?? "");
       if (!query) throw new Error("Search query is required");
-      const files = await fg(["**/*.{ts,tsx,js,jsx,json,md}"], { cwd: rootPath, onlyFiles: true, ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/dist-test/**"] });
+      const files = await fg(["**/*.{ts,tsx,js,jsx,json,md}"], { cwd: rootPath, onlyFiles: true, ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/dist-test/**", "**/.env*", "**/*credentials*", "**/*secret*", "**/*token*"] });
       const matches: Array<{ path: string; line: number; text: string }> = [];
       for (const file of files) {
         const content = await readFile(path.join(rootPath, file), "utf8");
@@ -93,6 +95,7 @@ export async function executeTool(tool: AgentTool, rootPath: string, args: ToolA
       return { output: result.stdout };
     }
     case "write_file": {
+      assertSafeAgentPath(String(args.path ?? ""));
       const filePath = resolveWorkspacePath(rootPath, String(args.path ?? ""));
       const content = String(args.content ?? "");
       assertReasonableSize(content);
