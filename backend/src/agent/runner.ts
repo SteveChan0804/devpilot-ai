@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { completeChat, ChatMessage, LlmProvider } from "../services/llm.service.js";
 import { retrieveChunks } from "../services/search.service.js";
-import { AgentTool, executeTool, isApprovalTool, toolDefinitions } from "./tools.js";
+import { AgentTool, executeTool, isApprovalTool, previewWrite, toolDefinitions } from "./tools.js";
 import { createApproval } from "./approvals.js";
 import { getRepositoryRoot } from "./repository.js";
 
@@ -46,7 +46,10 @@ export async function runAgentTask(repositoryId: string, task: string, provider:
     try {
       const args = { ...call.args };
       if (call.tool === "search_code" && !args.query) args.query = fallbackSearchQuery(task);
-      if (isApprovalTool(call.tool)) results.push({ tool: call.tool, status: "approval_required", approvalId: await createApproval({ taskId, repositoryId, tool: call.tool, args }), result: { args } });
+      if (isApprovalTool(call.tool)) {
+        const preview = call.tool === "write_file" ? await previewWrite(repositoryRoot, args) : { command: args.command };
+        results.push({ tool: call.tool, status: "approval_required", approvalId: await createApproval({ taskId, repositoryId, tool: call.tool, args }), result: { args, preview } });
+      }
       else results.push({ tool: call.tool, status: "completed", result: await executeTool(call.tool, repositoryRoot, args) });
     } catch (error) {
       results.push({ tool: call.tool, status: "failed", error: error instanceof Error ? error.message : String(error) });

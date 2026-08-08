@@ -21,6 +21,29 @@ export type ToolArgs = Record<string, string | number | undefined>;
 
 export function isApprovalTool(tool: AgentTool) { return tool === "write_file" || tool === "run_command"; }
 
+export async function previewWrite(rootPath: string, args: ToolArgs) {
+  const filePath = resolveWorkspacePath(rootPath, String(args.path ?? ""));
+  const next = String(args.content ?? "");
+  assertReasonableSize(next);
+  let previous = "";
+  try { previous = await readFile(filePath, "utf8"); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const before = previous.split("\n");
+  const after = next.split("\n");
+  const lines: string[] = [`--- ${path.relative(rootPath, filePath)}`, `+++ ${path.relative(rootPath, filePath)} (proposed)`];
+  const max = Math.max(before.length, after.length);
+  for (let index = 0; index < max && lines.length < 204; index++) {
+    if (before[index] === after[index]) { if (index < 3 || index >= max - 3) lines.push(`  ${before[index] ?? ""}`); }
+    else {
+      if (before[index] !== undefined) lines.push(`- ${before[index]}`);
+      if (after[index] !== undefined) lines.push(`+ ${after[index]}`);
+    }
+  }
+  if (lines.length >= 204) lines.push("… diff truncated …");
+  return { path: path.relative(rootPath, filePath), preview: lines.join("\n"), bytes: Buffer.byteLength(next, "utf8") };
+}
+
 export async function executeTool(tool: AgentTool, rootPath: string, args: ToolArgs) {
   switch (tool) {
     case "list_files": {
