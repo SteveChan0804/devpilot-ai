@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { getRepositories, indexRepository, Repository, Source, streamChat, runAgent, resolveAgentApproval, AgentCall } from "./api";
+import { cancelAgentTask, getRepositories, indexRepository, Repository, Source, streamChat, runAgent, resolveAgentApproval, AgentCall } from "./api";
 
 type Message = { role: "user" | "assistant"; content: string; sources?: Source[] };
 
@@ -14,6 +14,7 @@ export function App() {
   const [error, setError] = useState("");
   const [mode, setMode] = useState<"chat" | "agent">("chat");
   const [approvals, setApprovals] = useState<AgentCall[]>([]);
+  const [activeTaskId, setActiveTaskId] = useState("");
 
   useEffect(() => { getRepositories().then((items) => { setRepositories(items); if (items[0]) setRepositoryId(items[0].id); }).catch((e) => setError(e.message)); }, []);
 
@@ -30,7 +31,7 @@ export function App() {
     setMessages((items) => [...items, { role: "user", content: prompt }, { role: "assistant", content: "" }]);
     try {
       if (mode === "agent") {
-        const result = await runAgent(repositoryId, prompt);
+        const result = await runAgent(repositoryId, prompt, setActiveTaskId);
         setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: result.answer } : item));
         setApprovals((result.calls ?? []).filter((call) => call.status === "approval_required" && call.approvalId));
       } else {
@@ -38,7 +39,13 @@ export function App() {
       }
       setStatus("Ready");
     } catch (e) { setError(e instanceof Error ? e.message : "Chat failed"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setActiveTaskId(""); }
+  }
+
+  async function handleCancel() {
+    if (!activeTaskId) return;
+    try { const result = await cancelAgentTask(activeTaskId); setStatus(result.status); }
+    catch (e) { setError(e instanceof Error ? e.message : "Cancellation failed"); }
   }
 
   async function handleApproval(approvalId: string, approved: boolean) {
@@ -58,6 +65,7 @@ export function App() {
         <p className="hint">Agent mode can inspect the repository and request approval before changes.</p>
       </aside>
       <section className="chat panel"><div className="chat-header"><div><h2>Code assistant</h2><p>{mode === "agent" ? "Agent mode with approval-controlled actions." : "Ask about your indexed repository."}</p></div><span className="badge">{mode === "agent" ? "AGENT" : "LOCAL AI"}</span></div><div className="messages">{messages.length === 0 && <div className="empty"><strong>What should we explore?</strong><span>Ask about architecture, functions, bugs, or tests.</span></div>}{messages.map((message, index) => <article className={`message ${message.role}`} key={index}><span className="role">{message.role === "user" ? "YOU" : "DEVPILOT"}</span><div className="content">{message.content || (busy && index === messages.length - 1 ? "Thinking…" : "")}</div>{message.sources?.length ? <div className="sources"><strong>Sources</strong>{message.sources.map((source) => <span key={source.id}>{source.path}:{source.startLine}-{source.endLine}</span>)}</div> : null}</article>)}</div>{approvals.length > 0 && <div className="approvals"><strong>Approval required</strong>{approvals.map((approval) => <div key={approval.approvalId}><code>{approval.tool}</code>{approval.result?.preview ? <pre>{JSON.stringify(approval.result.preview, null, 2)}</pre> : null}<button onClick={() => handleApproval(approval.approvalId!, true)}>Approve</button><button onClick={() => handleApproval(approval.approvalId!, false)}>Reject</button></div>)}</div>}<form onSubmit={handleChat}><input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask about your code…" disabled={busy || !repositoryId} /><button type="submit" disabled={busy || !repositoryId || !question.trim()}>Send</button></form></section>
+    {activeTaskId && <button type="button" onClick={handleCancel}>Cancel active agent task</button>}
     </main>
     {error && <div className="error">{error}</div>}
   </div>;
