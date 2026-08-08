@@ -81,6 +81,20 @@ test("rejecting a linked approval closes the agent task safely", async () => {
   }
 });
 
+test("standalone tool approvals can be rejected", async () => {
+  const repository = (await db.insert(repositories).values({ name: "standalone-approval-test", rootPath: path.join(os.tmpdir(), `devpilot-standalone-${Date.now()}`) }).returning({ id: repositories.id }))[0];
+  try {
+    const request = await app.inject({ method: "POST", url: "/agent/tools/execute", payload: { repositoryId: repository.id, tool: "write_file", args: { path: "src/example.ts", content: "export const example = true;" } } });
+    assert.equal(request.statusCode, 200);
+    assert.equal(request.json().status, "approval_required");
+    const response = await app.inject({ method: "POST", url: "/agent/approve", payload: { approvalId: request.json().approvalId, approved: false } });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().status, "rejected");
+  } finally {
+    await db.delete(repositories).where(eq(repositories.id, repository.id));
+  }
+});
+
 test("streaming chat route exists and validates input", async () => {
   const options = await app.inject({ method: "OPTIONS", url: "/chat/stream" });
   assert.equal(options.statusCode, 204);

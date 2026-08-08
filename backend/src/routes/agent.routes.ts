@@ -83,7 +83,19 @@ export async function agentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const action = await resolveApproval(parsed.data.approvalId, parsed.data.approved);
     if (!action) return reply.code(404).send({ error: "Approval request not found or expired" });
-    if (!action.taskId) return reply.code(409).send({ error: "Approval is not linked to an agent task" });
+    if (!action.taskId) {
+      if (!parsed.data.approved) return { status: "rejected", answer: "The requested action was rejected. No changes were made." };
+      const repositoryRoot = await getRepositoryRoot(action.repositoryId);
+      const snapshot = action.tool === "write_file" ? await snapshotWrite(repositoryRoot, action.args) : undefined;
+      const result = await executeTool(action.tool, repositoryRoot, action.args);
+      const validation = action.tool === "write_file" ? await validateWorkspace(repositoryRoot) : undefined;
+      let rolledBack = false;
+      if (snapshot && validation && !validation.passed) {
+        await restoreSnapshot(repositoryRoot, snapshot);
+        rolledBack = true;
+      }
+      return { status: validation && !validation.passed ? "validation_failed" : "completed", tool: action.tool, result, validation, rolledBack };
+    }
     if (!parsed.data.approved) return resumeAgentTask({ id: action.id, taskId: action.taskId, repositoryId: action.repositoryId, tool: action.tool, approved: false });
     const repositoryRoot = await getRepositoryRoot(action.repositoryId);
     const snapshot = action.tool === "write_file" ? await snapshotWrite(repositoryRoot, action.args) : undefined;
