@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { executeTool, isApprovalTool, toolDefinitions } from "../agent/tools.js";
+import { executeTool, isApprovalTool, toolDefinitions, validateWorkspace } from "../agent/tools.js";
 import { createApproval, resolveApproval } from "../agent/approvals.js";
 import { getRepositoryRoot } from "../agent/repository.js";
 import { runAgentTask } from "../agent/runner.js";
@@ -65,8 +65,11 @@ export async function agentRoutes(app: FastifyInstance) {
       if (action.taskId) await db.update(agentTasks).set({ status: "rejected", completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
       return { status: "rejected", tool: action.tool, taskId: action.taskId };
     }
-    const result = await executeTool(action.tool, await getRepositoryRoot(action.repositoryId), action.args);
-    if (action.taskId) await db.update(agentTasks).set({ status: "completed", result: { approval: { tool: action.tool, result } }, completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
-    return { status: "completed", tool: action.tool, taskId: action.taskId, result };
+    const repositoryRoot = await getRepositoryRoot(action.repositoryId);
+    const result = await executeTool(action.tool, repositoryRoot, action.args);
+    const validation = action.tool === "write_file" ? await validateWorkspace(repositoryRoot) : undefined;
+    const status = validation && !validation.passed ? "validation_failed" : "completed";
+    if (action.taskId) await db.update(agentTasks).set({ status, result: { approval: { tool: action.tool, result, validation } }, completedAt: new Date() }).where(eq(agentTasks.id, action.taskId));
+    return { status, tool: action.tool, taskId: action.taskId, result, validation };
   });
 }

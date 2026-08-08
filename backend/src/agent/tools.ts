@@ -44,6 +44,26 @@ export async function previewWrite(rootPath: string, args: ToolArgs) {
   return { path: path.relative(rootPath, filePath), preview: lines.join("\n"), bytes: Buffer.byteLength(next, "utf8") };
 }
 
+export async function validateWorkspace(rootPath: string) {
+  const checks: Array<{ directory: string; command: string; status: "passed" | "failed"; output: string }> = [];
+  const candidates = [rootPath, path.join(rootPath, "backend"), path.join(rootPath, "frontend")];
+  for (const directory of candidates) {
+    let packageJson: { scripts?: Record<string, string> };
+    try { packageJson = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8")); } catch { continue; }
+    const command = packageJson.scripts?.typecheck ? "npm run typecheck" : packageJson.scripts?.build ? "npm run build" : undefined;
+    if (!command) continue;
+    const executable = process.platform === "win32" ? "npm.cmd" : "npm";
+    try {
+      const result = await execFileAsync(executable, command.split(" ").slice(1), { cwd: directory, timeout: 120_000, maxBuffer: 500_000 });
+      checks.push({ directory: path.relative(rootPath, directory) || ".", command, status: "passed", output: `${result.stdout}${result.stderr}`.slice(-20_000) });
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string; message?: string };
+      checks.push({ directory: path.relative(rootPath, directory) || ".", command, status: "failed", output: `${failure.stdout ?? ""}${failure.stderr ?? failure.message ?? ""}`.slice(-20_000) });
+    }
+  }
+  return { checks, passed: checks.every((check) => check.status === "passed") };
+}
+
 export async function executeTool(tool: AgentTool, rootPath: string, args: ToolArgs) {
   switch (tool) {
     case "list_files": {
