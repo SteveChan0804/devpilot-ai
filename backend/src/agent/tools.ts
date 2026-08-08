@@ -53,9 +53,11 @@ export async function validateWorkspace(rootPath: string) {
     try { packageJson = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8")); } catch { continue; }
     const command = packageJson.scripts?.typecheck ? "npm run typecheck" : packageJson.scripts?.build ? "npm run build" : undefined;
     if (!command) continue;
-    const executable = process.platform === "win32" ? "npm.cmd" : "npm";
+    const executable = process.platform === "win32" ? "cmd.exe" : "npm";
     try {
-      const result = await execFileAsync(executable, command.split(" ").slice(1), { cwd: directory, timeout: 120_000, maxBuffer: 500_000 });
+      const npmArguments = command.slice("npm ".length);
+      const commandArguments = process.platform === "win32" ? ["/d", "/s", "/c", `npm.cmd ${npmArguments}`] : npmArguments.split(" ");
+      const result = await execFileAsync(executable, commandArguments, { cwd: directory, timeout: 120_000, maxBuffer: 500_000 });
       checks.push({ directory: path.relative(rootPath, directory) || ".", command, status: "passed", output: `${result.stdout}${result.stderr}`.slice(-20_000) });
     } catch (error) {
       const failure = error as { stdout?: string; stderr?: string; message?: string };

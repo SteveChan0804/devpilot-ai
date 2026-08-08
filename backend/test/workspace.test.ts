@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertSafeAgentPath, resolveWorkspacePath } from "../src/agent/workspace.js";
-import { executeTool, previewWrite } from "../src/agent/tools.js";
+import { executeTool, previewWrite, validateWorkspace } from "../src/agent/tools.js";
 
 test("workspace guard permits files inside the repository", () => {
   assert.equal(resolveWorkspacePath("C:\\repo", "src\\app.ts"), "C:\\repo\\src\\app.ts");
@@ -42,6 +42,19 @@ test("approved npm scripts route to package workspaces", async () => {
     const result = await executeTool("run_command", root, { command: "npm run typecheck" });
     assert.deepEqual(result.directories, ["backend"]);
     assert.match(result.output, /check-ok/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("post-change validation uses the same workspace-safe npm runner", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "devpilot-validation-"));
+  try {
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ scripts: { typecheck: "node -e \\\"console.log('validation-ok')\\\"" } }), "utf8");
+    const result = await validateWorkspace(root);
+    assert.equal(result.passed, true);
+    assert.equal(result.checks[0].status, "passed");
+    assert.match(result.checks[0].output, /validation-ok/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
