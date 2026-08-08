@@ -45,8 +45,23 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
   constructor(private readonly extensionUri: vscode.Uri) {}
   resolveWebviewView(view: vscode.WebviewView) {
     view.webview.options = { enableScripts: true };
-    view.webview.html = `<!doctype html><html><body style="font-family: sans-serif"><h3>DevPilot AI</h3><textarea id="q" rows="5" style="width:100%" placeholder="Ask about this workspace"></textarea><button id="ask">Ask</button><pre id="answer" style="white-space:pre-wrap"></pre><script>const vscode=acquireVsCodeApi();document.getElementById('ask').onclick=()=>{const q=document.getElementById('q').value;vscode.postMessage({type:'ask',q})};window.addEventListener('message',e=>{document.getElementById('answer').textContent=e.data.answer})</script></body></html>`;
-    view.webview.onDidReceiveMessage(async (message) => { if (message.type !== "ask") return; try { const repository = await currentRepository(); const result = await api<{ answer: string }>("/chat", { method: "POST", body: { repositoryId: repository.id, message: message.q, provider: "ollama", limit: 8 } }); view.webview.postMessage({ answer: result.answer }); } catch (error) { view.webview.postMessage({ answer: String(error) }); } });
+    view.webview.html = `<!doctype html><html><body style="font-family: sans-serif"><h3>DevPilot AI</h3><button id="index">Index Workspace</button><p id="status">Index this workspace before asking questions.</p><textarea id="q" rows="5" style="width:100%" placeholder="Ask about this workspace"></textarea><button id="ask">Ask</button><pre id="answer" style="white-space:pre-wrap"></pre><script>const vscode=acquireVsCodeApi();document.getElementById('index').onclick=()=>{document.getElementById('status').textContent='Indexing…';vscode.postMessage({type:'index'})};document.getElementById('ask').onclick=()=>{const q=document.getElementById('q').value;vscode.postMessage({type:'ask',q})};window.addEventListener('message',e=>{if(e.data.status)document.getElementById('status').textContent=e.data.status;if(e.data.answer)document.getElementById('answer').textContent=e.data.answer})</script></body></html>`;
+    view.webview.onDidReceiveMessage(async (message) => {
+      try {
+        if (message.type === "index") {
+          const rootPath = workspacePath();
+          const result = await api<{ files: number; chunks: number }>("/repositories/index", { method: "POST", body: { rootPath, name: vscode.workspace.name ?? "workspace" } });
+          view.webview.postMessage({ status: `Indexed ${result.files} files and ${result.chunks} chunks.` });
+          return;
+        }
+        if (message.type !== "ask") return;
+        const repository = await currentRepository();
+        const result = await api<{ answer: string }>("/chat", { method: "POST", body: { repositoryId: repository.id, message: message.q, provider: "ollama", limit: 8 } });
+        view.webview.postMessage({ answer: result.answer, status: "Ready" });
+      } catch (error) {
+        view.webview.postMessage({ answer: String(error), status: "Action failed" });
+      }
+    });
   }
 }
 
